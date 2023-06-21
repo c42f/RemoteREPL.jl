@@ -2,6 +2,7 @@ using RemoteREPL
 using Test
 using Sockets
 using RemoteREPL: repl_prompt_text, match_magic_syntax, DEFAULT_PORT
+using UUIDs
 
 ENV["JULIA_DEBUG"] = "RemoteREPL"
 
@@ -52,7 +53,7 @@ end
     function fake_conn(host, port; is_open=true)
         io = IOBuffer()
         is_open || close(io)
-        RemoteREPL.Connection(host, port, :none, ``, nothing, nothing, io, :Main)
+        RemoteREPL.Connection(host, port, :none, ``, nothing, nothing, io, :Main, uuid4())
     end
     @test repl_prompt_text(fake_conn(Sockets.localhost, DEFAULT_PORT)) == "julia@localhost> "
     @test repl_prompt_text(fake_conn("localhost",       DEFAULT_PORT)) == "julia@localhost> "

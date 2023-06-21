@@ -107,6 +107,17 @@ julia@localhost> a_variable
 1
 ```
 
+
+## Use common session among different clients
+A session, as implemented in `ServerSideSession`, describes the display properties and the module under which commands are evaluated.
+Multiple clients can share same such properties by using the same `session_id`. For example:
+
+```julia
+julia> session_id = UUID("f03aec15-3e14-4d58-bcfa-82f8d33c9f9a")
+
+julia> connect_repl(; session_id=session_id)
+```
+
 ## Use alternatives to SSH
 
 ### AWS Session Manager
@@ -127,3 +138,50 @@ In environments without any REPL integrations like Jupyter or Pluto notebooks yo
 connect_remote();
 ```
 which will allow you to use `@remote` without the REPL mode.
+
+### More on Pluto
+Pluto presents a peculiarity as the default module is constantly changing.
+In order to closely track the newest notebook state, you will need to tap into the client's session and update the module.
+You could write the following code in the pluto notebook that updates the module every second (if you have a better event-driven update solution, please raise an issue!).
+
+```julia
+using PlutoLinks, PlutoHooks
+
+using RemoteREPL, Sockets, UUIDs
+
+server = Sockets.listen(Sockets.localhost, 27765)
+
+@async serve_repl(server)
+
+session_id = UUID("f03aec15-3e14-4d58-bcfa-82f8d33c9f9a")
+
+con2server = connect_remote(Sockets.localhost, 27765; session_id=session_id)
+
+takemodulesymbol() = Symbol("workspace#" ,PlutoRunner.moduleworkspace_count[])
+
+let # update module in RemoteREPL every 1 sec
+	count, set_count = @use_state(1)
+	@use_task([]) do
+		new_count = count
+		while true
+			sleep(1.0)
+			new_count += 1
+			set_count(new_count) # (this will trigger a re-run)
+		end
+	end
+	mod = eval(takemodulesymbol())
+	#@eval(@remoterepl $"%module $mod")
+	remote_module!(mod)
+end
+```
+
+Then open a repl and do:
+
+```julia
+julia> using RemoteREPL, Sockets, UUIDs
+
+julia> connect_repl(Sockets.localhost, 27765; session_id=UUID("f03aec15-3e14-4d58-bcfa-82f8d33c9f9a"))
+```
+
+Since the session's module is being regularly updated by the Pluto notebook, your REPL will be in sync with the notebook's state.
+

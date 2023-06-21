@@ -1,16 +1,15 @@
-using Sockets
-using Serialization
-using REPL
-using Logging
-
 mutable struct ServerSideSession
-    socket
+    sockets::Vector
     display_properties::Dict
     in_module::Module
 end
 
-Base.isopen(session::ServerSideSession) = isopen(session.socket)
-Base.close(session::ServerSideSession)  = close(session.socket)
+Base.isopen(session::ServerSideSession) = any(isopen.(session.sockets))
+
+function close_and_delete!(session::ServerSideSession, socket)
+    close(socket)
+    filter!(!=(socket), session.sockets)
+end
 
 function send_header(io, ser_version=Serialization.ser_version)
     write(io, PROTOCOL_MAGIC, PROTOCOL_VERSION)
@@ -177,8 +176,7 @@ function serialize_responses(socket, response_chan)
 end
 
 # Serve a remote REPL session to a single client
-function serve_repl_session(session)
-    socket = session.socket
+function serve_repl_session(session, socket)
     send_header(socket)
     @sync begin
         request_chan = Channel(1)
@@ -248,29 +246,43 @@ end
 serve_repl(port::Integer; kws...) = serve_repl(Sockets.localhost, port; kws...)
 
 function serve_repl(server::Base.IOServer; on_client_connect=nothing)
-    open_sessions = Set{ServerSideSession}()
+    open_sessions = Dict{UUID, ServerSideSession}()
+    session_lock = Base.ReentrantLock()
     @sync try
         while isopen(server)
             socket = accept(server)
-            session = ServerSideSession(socket, Dict(), Main)
-            push!(open_sessions, session)
+
+            session, session_id, socketidx = lock(session_lock) do
+                # expect session id
+                session_id = deserialize(socket)
+                session = if haskey(open_sessions, session_id)
+                    push!(open_sessions[session_id].sockets, socket)
+                    open_sessions[session_id] 
+                else
+                    open_sessions[session_id] = ServerSideSession([socket], Dict(), Main) 
+                end
+                session, session_id, length(session.sockets)
+            end
+
             peer = getpeername(socket)
             @async try
                 if !isnothing(on_client_connect)
                     on_client_connect(session)
                 end
-                serve_repl_session(session)
+                serve_repl_session(session, socket)
             catch exc
-                if !(exc isa EOFError && !isopen(session))
+                if !(exc isa EOFError && !isopen(socket))
                     @warn "Something went wrong evaluating client command" #=
                         =# exception=exc,catch_backtrace()
                 end
             finally
                 @info "REPL client exited" peer
-                close(session)
-                pop!(open_sessions, session)
+                close_and_delete!(session, socket)
+                lock(session_lock) do
+                    length(session.sockets) == 0 && delete!(open_sessions, session_id)
+                end
             end
-            @info "REPL client opened a connection" peer
+            @info "REPL client opened a connection with session id $(session_id)" peer
         end
     catch exc
         if exc isa Base.IOError && !isopen(server)
@@ -280,8 +292,8 @@ function serve_repl(server::Base.IOServer; on_client_connect=nothing)
         @error "Unexpected server failure" isopen(server) exception=exc,catch_backtrace()
         rethrow()
     finally
-        for session in open_sessions
-            close(session)
+        for session in values(open_sessions)
+            foreach(close, session.sockets)
         end
     end
 end
