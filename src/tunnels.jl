@@ -1,7 +1,5 @@
 # Utilities for securely tunnelling traffic from client to a remote server
 
-using OpenSSH_jll
-
 # Find a free port on `network_interface`
 function find_free_port(network_interface)
     # listen on port 0 => kernel chooses a free port. See, for example,

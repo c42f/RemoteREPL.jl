@@ -1,8 +1,3 @@
-using ReplMaker
-using REPL
-using Serialization
-using Sockets
-
 struct RemoteException <: Exception
     msg::String
 end
@@ -114,7 +109,8 @@ mutable struct Connection
     region::Union{AbstractString,Nothing}
     namespace::Union{AbstractString,Nothing}
     socket::Union{IO,Nothing}
-    in_module::Symbol
+    in_module::Union{Symbol, Expr}
+    session_id::UUID
 end
 
 function Connection(; host::Union{AbstractString,Sockets.IPAddr}=Sockets.localhost,
@@ -123,8 +119,11 @@ function Connection(; host::Union{AbstractString,Sockets.IPAddr}=Sockets.localho
                     ssh_opts::Cmd=``,
                     region=nothing,
                     namespace=nothing,
-                    in_module::Symbol=:Main)
-    conn = Connection(host, port, tunnel, ssh_opts, region, namespace, nothing, in_module)
+                    in_module::Symbol=:Main,
+                    session_id=nothing)
+    sesid = isnothing(session_id) ? UUIDs.uuid4() : session_id
+    @info "Using session id $(sesid)"
+    conn = Connection(host, port, tunnel, ssh_opts, region, namespace, nothing, in_module, sesid)
     setup_connection!(conn)
     finalizer(close, conn)
 end
@@ -139,6 +138,8 @@ function setup_connection!(conn::Connection)
             tunnel=conn.tunnel, ssh_opts=conn.ssh_opts, region=conn.region,
             namespace=conn.namespace)
     end
+    # transmit session id
+    serialize(socket, conn.session_id)
     try
         verify_header(socket)
     catch exc
@@ -305,7 +306,13 @@ function REPL.complete_line(provider::RemoteCompletionProvider,
     return result[2]
 end
 
-function run_remote_repl_command(conn, out_stream, cmdstr)
+"""
+    remotecmd(conn::Connection, out_stream::IO, cmdstr::String)
+
+Evaluate `cmdstr` in the remote session of connection `conn` and write result into `out_stream`.
+Also supports the magic `RemoteREPL` commands like `%module` and `%include`.
+"""
+function remotecmd(conn::Connection, out_stream::IO, cmdstr::String)
     # Compute command
     magic = match_magic_syntax(cmdstr)
     if isnothing(magic)
@@ -374,6 +381,43 @@ function run_remote_repl_command(conn, out_stream, cmdstr)
     return result_for_display
 end
 
+"""
+    remotecmd(cmdstr::String)
+
+Evaluate `cmdstr` in the last opened RemoteREPL connection and print result to `Base.stdout`
+"""
+remotecmd(cmd::String) = remotecmd(_repl_client_connection, Base.stdout, cmd)
+
+"""
+    remotecmd(conn::Connection, cmdstr::String)
+
+Evaluate `cmdstr` in the connection `conn` and print result to `Base.stdout`.
+"""
+remotecmd(conn::Connection, cmd::String) = remotecmd(conn, Base.stdout, cmd)
+
+"""
+    remote_module!(conn::Connection = _repl_client_connection, mod::Module)
+
+Change future remote commands in the session of connection `conn` to be evaluated into module `mod`.
+The default connection `_repl_client_connection` is the last established RemoteREPL connection.
+If the module cannot be evaluated locally pass the name as a string.
+Equivalent to using the `%module` magic.
+"""
+remote_module!(conn::Connection, mod::Module) = remotecmd(conn, Base.stdout, "%module $(mod)")
+remote_module!(mod::Module) = remotecmd(_repl_client_connection, Base.stdout, "%module $(mod)")
+
+"""
+    remote_module!(conn::Connection = _repl_client_connection, modstr::String)
+
+Change future remote commands in the session of connection `conn` to be evaluated into module identified by `modstr`.
+The default connection `_repl_client_connection` is the last established RemoteREPL connection.
+Equivalent to using the `%module` magic.
+"""
+remote_module!(conn::Connection, modstr::String) = remotecmd(conn, Base.stdout, "%module "*modstr)
+remote_module!(modstr::String) = remotecmd(_repl_client_connection, Base.stdout, "%module "*modstr)
+
+
+
 remote_eval_and_fetch(::Nothing, ex) = error("No remote connection is active")
 
 function remote_eval_and_fetch(conn::Connection, ex)
@@ -411,7 +455,7 @@ _repl_client_connection = nothing
 """
     connect_repl([host=localhost,] port::Integer=$DEFAULT_PORT;
                  use_ssh_tunnel = (host != localhost) ? :ssh : :none,
-                 ssh_opts = ``, repl=Base.active_repl)
+                 ssh_opts = ``, repl=Base.active_repl, session_id = nothing)
 
 Connect client REPL to a remote `host` on `port`. This is then accessible as a
 remote sub-repl of the current Julia session.
@@ -440,11 +484,12 @@ function connect_repl(host=Sockets.localhost, port::Integer=DEFAULT_PORT;
                       region::Union{AbstractString,Nothing}=nothing,
                       namespace::Union{AbstractString,Nothing}=nothing,
                       startup_text::Bool=true,
-                      repl=Base.active_repl)
+                      repl=Base.active_repl,
+                      session_id=nothing)
 
-    conn = connect_remote(host, port; tunnel, ssh_opts, region,namespace)
+    conn = connect_remote(host, port; tunnel, ssh_opts, region, namespace, session_id)
     out_stream = stdout
-    prompt = ReplMaker.initrepl(c->run_remote_repl_command(conn, out_stream, c),
+    prompt = ReplMaker.initrepl(c->remotecmd(conn, out_stream, c),
                        repl         = Base.active_repl,
                        valid_input_checker = valid_input_checker,
                        prompt_text  = ()->repl_prompt_text(conn),
@@ -463,7 +508,7 @@ connect_repl(port::Integer) = connect_repl(Sockets.localhost, port)
 """
     connect_remote([host=localhost,] port::Integer=$DEFAULT_PORT;
                  tunnel = (host != localhost) ? :ssh : :none,
-                 ssh_opts = ``)
+                 ssh_opts = ``, session_id = nothing)
 
 Connect to remote server without any REPL integrations. This will allow you to use `@remote`, but not the REPL mode.
 Useful in circumstances where no REPL is available, but interactivity is desired like Jupyter or Pluto notebooks.
@@ -473,7 +518,8 @@ function connect_remote(host=Sockets.localhost, port::Integer=DEFAULT_PORT;
                         tunnel::Symbol = host!=Sockets.localhost ? :ssh : :none,
                         ssh_opts::Cmd=``,
                         region::Union{AbstractString,Nothing}=nothing,
-                        namespace::Union{AbstractString,Nothing}=nothing)
+                        namespace::Union{AbstractString,Nothing}=nothing,
+                        session_id=nothing)
 
     global _repl_client_connection
 
@@ -485,7 +531,7 @@ function connect_remote(host=Sockets.localhost, port::Integer=DEFAULT_PORT;
         end
     end
     conn = RemoteREPL.Connection(host=host, port=port, tunnel=tunnel,
-                                 ssh_opts=ssh_opts, region=region, namespace=namespace)
+                                 ssh_opts=ssh_opts, region=region, namespace=namespace, session_id = session_id)
 
     # Record the connection in a global variable so it's accessible to REPL and `@remote`
     _repl_client_connection = conn
@@ -541,7 +587,7 @@ _remote_expr(conn, ex) = :(remote_eval_and_fetch($conn, $(QuoteNode(ex))))
     remote_eval(cmdstr)
     remote_eval(host, port, cmdstr)
 
-Parse a string `cmdstr`, evaluate it in the remote REPL server's `Main` module,
+Parse a string `cmdstr`, evaluate it in the remote REPL server's `Main` module or the session with `session_id`,
 then close the connection. Returns the result which the REPL would normally
 pass to `show()` (likely a `Text` object).
 
@@ -553,12 +599,12 @@ RemoteREPL.remote_eval("exit()")
 ```
 """
 function remote_eval(host, port::Integer, cmdstr::AbstractString;
-                     tunnel::Symbol = host!=Sockets.localhost ? :ssh : :none)
-    conn = Connection(; host=host, port=port, tunnel=tunnel)
+                     tunnel::Symbol = host!=Sockets.localhost ? :ssh : :none, session_id=nothing)
+    conn = Connection(; host=host, port=port, tunnel=tunnel, session_id=session_id)
     local result
     try
         setup_connection!(conn)
-        result = run_remote_repl_command(conn, IOBuffer(), cmdstr)
+        result = remotecmd(conn, IOBuffer(), cmdstr)
     finally
         close(conn)
     end

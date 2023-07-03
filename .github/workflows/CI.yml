@@ -73,6 +73,7 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
         env:
           SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+      - run: julia -e "import Pkg; Pkg.add(\"TestEnv\")"
   docs:
     name: Documentation
     runs-on: ubuntu-latest
@@ -83,7 +84,6 @@ jobs:
           version: '1.6'
       - run: julia --project=docs -e '
           using Pkg;
-          Pkg.develop(PackageSpec(; path=pwd()));
           Pkg.instantiate();'
       - run: julia --project=docs docs/make.jl
         env:
