@@ -42,7 +42,7 @@ serve_repl
 connect_remote
 RemoteREPL.@remote
 RemoteREPL.remote_eval
-RemoteREPL.run_remote_repl_command
+RemoteREPL.remotecmd
 RemoteREPL.remote_module!
 ```
 

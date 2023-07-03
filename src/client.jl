@@ -307,12 +307,12 @@ function REPL.complete_line(provider::RemoteCompletionProvider,
 end
 
 """
-    run_remote_repl_command(conn::Connection, out_stream::IO, cmdstr::String)
+    remotecmd(conn::Connection, out_stream::IO, cmdstr::String)
 
 Evaluate `cmdstr` in the remote session of connection `conn` and write result into `out_stream`.
 Also supports the magic `RemoteREPL` commands like `%module` and `%include`.
 """
-function run_remote_repl_command(conn::Connection, out_stream::IO, cmdstr::String)
+function remotecmd(conn::Connection, out_stream::IO, cmdstr::String)
     # Compute command
     magic = match_magic_syntax(cmdstr)
     if isnothing(magic)
@@ -382,41 +382,39 @@ function run_remote_repl_command(conn::Connection, out_stream::IO, cmdstr::Strin
 end
 
 """
-    run_remote_repl_command(cmdstr::String)
+    remotecmd(cmdstr::String)
 
 Evaluate `cmdstr` in the last opened RemoteREPL connection and print result to `Base.stdout`
 """
-run_remote_repl_command(cmd::String) = run_remote_repl_command(_repl_client_connection, Base.stdout, cmd)
+remotecmd(cmd::String) = remotecmd(_repl_client_connection, Base.stdout, cmd)
 
 """
-    run_remote_repl_command(conn::Connection, cmdstr::String)
+    remotecmd(conn::Connection, cmdstr::String)
 
 Evaluate `cmdstr` in the connection `conn` and print result to `Base.stdout`.
 """
-run_remote_repl_command(conn::Connection, cmd::String) = run_remote_repl_command(conn, Base.stdout, cmd)
+remotecmd(conn::Connection, cmd::String) = remotecmd(conn, Base.stdout, cmd)
 
 """
-    remote_module!(mod::Module, conn::Connection = _repl_client_connection)
+    remote_module!(conn::Connection = _repl_client_connection, mod::Module)
 
 Change future remote commands in the session of connection `conn` to be evaluated into module `mod`.
 The default connection `_repl_client_connection` is the last established RemoteREPL connection.
 If the module cannot be evaluated locally pass the name as a string.
 Equivalent to using the `%module` magic.
 """
-function remote_module!(mod::Module, conn=_repl_client_connection)
-    run_remote_repl_command(conn, Base.stdout, "%module $(mod)")
-end
+remote_module!(conn::Connection, mod::Module) = remotecmd(conn, Base.stdout, "%module $(mod)")
+remote_module!(mod::Module) = remotecmd(_repl_client_connection, Base.stdout, "%module $(mod)")
 
 """
-    remote_module!(modstr::String, conn::Connection = _repl_client_connection)
+    remote_module!(conn::Connection = _repl_client_connection, modstr::String)
 
 Change future remote commands in the session of connection `conn` to be evaluated into module identified by `modstr`.
 The default connection `_repl_client_connection` is the last established RemoteREPL connection.
 Equivalent to using the `%module` magic.
 """
-function remote_module!(modstr::String, conn=_repl_client_connection)
-    run_remote_repl_command(conn, Base.stdout, "%module "*modstr)
-end
+remote_module!(conn::Connection, modstr::String) = remotecmd(conn, Base.stdout, "%module "*modstr)
+remote_module!(modstr::String) = remotecmd(_repl_client_connection, Base.stdout, "%module "*modstr)
 
 
 
@@ -491,7 +489,7 @@ function connect_repl(host=Sockets.localhost, port::Integer=DEFAULT_PORT;
 
     conn = connect_remote(host, port; tunnel, ssh_opts, region, namespace, session_id)
     out_stream = stdout
-    prompt = ReplMaker.initrepl(c->run_remote_repl_command(conn, out_stream, c),
+    prompt = ReplMaker.initrepl(c->remotecmd(conn, out_stream, c),
                        repl         = Base.active_repl,
                        valid_input_checker = valid_input_checker,
                        prompt_text  = ()->repl_prompt_text(conn),
@@ -606,7 +604,7 @@ function remote_eval(host, port::Integer, cmdstr::AbstractString;
     local result
     try
         setup_connection!(conn)
-        result = run_remote_repl_command(conn, IOBuffer(), cmdstr)
+        result = remotecmd(conn, IOBuffer(), cmdstr)
     finally
         close(conn)
     end

@@ -19,7 +19,7 @@ atreplinit() do repl
         # Run one command as part of connection setup to trigger compilation
         # This makes the REPL more immediately responsive after it prints the
         # welcome message.
-        RemoteREPL.run_remote_repl_command(RemoteREPL._repl_client_connection,
+        remotecmd(RemoteREPL._repl_client_connection,
                                            stdout, "\"hi\"")
         println("""
             Connected to $host

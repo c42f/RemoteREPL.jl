@@ -252,16 +252,15 @@ function serve_repl(server::Base.IOServer; on_client_connect=nothing)
         while isopen(server)
             socket = accept(server)
 
-            session, session_id, socketidx = lock(session_lock) do
-                # expect session id
-                session_id = deserialize(socket)
-                session = if haskey(open_sessions, session_id)
+            # expect session id
+            session_id = deserialize(socket)
+            session = lock(session_lock) do
+                if haskey(open_sessions, session_id)
                     push!(open_sessions[session_id].sockets, socket)
                     open_sessions[session_id] 
                 else
                     open_sessions[session_id] = ServerSideSession([socket], Dict(), Main) 
                 end
-                session, session_id, length(session.sockets)
             end
 
             peer = getpeername(socket)

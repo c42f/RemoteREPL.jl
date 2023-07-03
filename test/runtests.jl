@@ -64,12 +64,13 @@ end
     @test repl_prompt_text(fake_conn("ABC", DEFAULT_PORT, is_open=false)) == "julia@ABC [disconnected]> "
 end
 
-function wait_conn(host, port, use_ssh; max_tries=4)
+function wait_conn(host, port, use_ssh; max_tries=4, session_id=nothing)
     for i=1:max_tries
         try
             return RemoteREPL.Connection(host=host, port=port,
-                                         tunnel=use_ssh ? :ssh : :none,
-                                         ssh_opts=`-o StrictHostKeyChecking=no`)
+                                        tunnel=use_ssh ? :ssh : :none,
+                                        ssh_opts=`-o StrictHostKeyChecking=no`,
+                                        session_id=session_id)
         catch exc
             if i == max_tries
                 rethrow()
@@ -81,7 +82,7 @@ function wait_conn(host, port, use_ssh; max_tries=4)
 end
 
 function runcommand_unwrap(conn, cmdstr)
-    result = RemoteREPL.run_remote_repl_command(conn, IOBuffer(), cmdstr)
+    result = remotecmd(conn, IOBuffer(), cmdstr)
     # Unwrap Text for testing purposes
     return result isa Text ? result.content : result
 end
@@ -113,7 +114,7 @@ end
 
 # Use non-default port to avoid clashes with concurrent interactive use or testing.
 test_port = RemoteREPL.find_free_port(Sockets.localhost)
-server_proc = run(`$(Base.julia_cmd()) -e "using Sockets; using RemoteREPL; serve_repl($test_port)"`, wait=false)
+server_proc = run(`$(Base.julia_cmd()) --project -e "using TestEnv; TestEnv.activate(); using RemoteREPL, Sockets, UUIDs ; serve_repl($test_port)"`, wait=false)
 
 try
 
@@ -301,7 +302,7 @@ end
 
 
 test_port = RemoteREPL.find_free_port(Sockets.localhost)
-server_proc = run(```$(Base.julia_cmd()) -e "using Sockets; using RemoteREPL; module EvalInMod ; end;
+server_proc = run(```$(Base.julia_cmd()) --project -e "using TestEnv; TestEnv.activate(); using RemoteREPL, Sockets, UUIDs ; module EvalInMod ; end;
                   serve_repl($test_port, on_client_connect=sess->sess.in_module=EvalInMod)"```, wait=false)
 try
 
@@ -311,6 +312,17 @@ try
     runcommand(cmdstr) = runcommand_unwrap(conn, cmdstr)
 
     @test runcommand("@__MODULE__") == "Main.EvalInMod"
+
+    # common sessions
+    sid = uuid4()
+    conn2 = wait_conn(test_interface, test_port, use_ssh; session_id = sid)
+    conn3 = wait_conn(test_interface, test_port, use_ssh; session_id = sid)
+
+    # change module to Main once
+    remote_module!(conn2, "Main")
+
+    @test runcommand_unwrap(conn2, "@__MODULE__") == "Main"
+    @test runcommand_unwrap(conn3, "@__MODULE__") == "Main"
 end
 
 finally

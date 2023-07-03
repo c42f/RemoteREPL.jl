@@ -118,6 +118,15 @@ julia> session_id = UUID("f03aec15-3e14-4d58-bcfa-82f8d33c9f9a")
 julia> connect_repl(; session_id=session_id)
 ```
 
+## Pass a command non-interactively
+To programmatically pass a command to the remote julia kernel use [`remotecmd`](@ref). For example:
+
+```julia
+julia> con2server = connect_remote(Sockets.localhost, 9093) # connect to port 9093 in localhost
+
+julia> remotecmd(con2server, "myvar = 1") # define a new var
+```
+
 ## Use alternatives to SSH
 
 ### AWS Session Manager
