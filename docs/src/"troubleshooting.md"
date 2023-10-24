@@ -1,0 +1,24 @@
+# Troubleshooting
+This page will contain errors that have been seen before, and how they were fixed. The goal is that solutions to common problems are found here. 
+By "local REPL" a REPL running on the same computer as the host is meant. By "remote REPL", a REPL running on a different computer is meant.
+
+### IOError: connect: connection refused (ECONNREFUSED)
+This error has been encountered when
+1) Running `connect_repl()`, while attempting to connect to a local REPL. The problem was that no local REPL had previously run `serve_repl()`. To fix this, run `serve_repl()` in the local REPL.
+2) Running `connect_remote()`, while attempting to connect to a local REPL. The problem was that no local REPL had previously run `serve_repl()`. To fix this, run `serve_repl()` in the local REPL.
+3) Running `connect_remote()`, while attempting to connect to a remote REPL. The problem was that no address was provided. To fix this, pass an adress as a string to `connect_remote`, as in `connect_remote("pi@192.168.4.2")`
+
+### RemoteREPL stream was closed while reading header
+This error has been encountered when
+1) Running `connect_remote("pi@192.168.4.2")`, while attempting to connect to a remote REPL. The problem was that the remote REPL had not previously run `serve_repl()`. To fix this, run `serve_repl()` in the remote REPL.
+2) Running `connect_repl("pi@192.168.4.2")`, while attempting to connect to a remote REPL. The problem was that the remote REPL had not previously run `serve_repl()`. To fix this, run `serve_repl()` in the remote REPL.
+
+### Bad owner or permissions on /home/username/.ssh/config
+This error is raised by [this](https://github.com/openssh/openssh-portable/blob/947a3e829a5b8832a4768fd764283709a4ca7955/readconf.c#L1711) line of code, from OpenSSH. 
+The requirements translates to that "the config file must be owned by root or by the user running the ssh and can not be writable by any group or other users." 
+(Quoted from [this](https://superuser.com/questions/1212402/bad-owner-or-permissions-on-ssh-config-file) thread). The fix is therefore to remove write premissions for 
+any group or other users. On a linux system, this is acomplished by running the following code.
+```
+chmod go-w /home/username/.ssh/config
+```
+If you are using a different operating system, please google how to remove write premissions on files, and try to do the same thing.

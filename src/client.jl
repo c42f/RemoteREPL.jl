@@ -139,6 +139,7 @@ function setup_connection!(conn::Connection)
             tunnel=conn.tunnel, ssh_opts=conn.ssh_opts, region=conn.region,
             namespace=conn.namespace)
     end
+    Sockets.nagle(socket, false)  # Disables nagles algorithm. Appropriate for interactive connections.
     try
         verify_header(socket)
     catch exc
