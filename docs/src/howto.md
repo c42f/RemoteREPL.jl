@@ -13,7 +13,7 @@
    `ssh-agent` running with your private key loaded. If you've got some
    particular ssh options needed for the server, you'll find it convenient to
    set these up in the OpenSSH config file (`~/.ssh/config` on unix). For
-   example,
+   example, the config file could contain the following:
    ```ssh-config
    Host your.example.host
       User ubuntu
@@ -127,3 +127,28 @@ In environments without any REPL integrations like Jupyter or Pluto notebooks yo
 connect_remote();
 ```
 which will allow you to use `@remote` without the REPL mode.
+## Troubleshooting connection issues 
+Sometimes errors will be encountered. This section aims to show some errors experienced by users, and what the underlying problem was. We will use some terms in this section, introduced in the table below.
+|Term|Explanation|
+|---|---|
+|"local REPL"|a REPL running on the same computer as the host. This could mean connecting two julia instances running on the same computer.|
+|"remote REPL"|a REPL running on a different computer than the host.|
+|"address"|a placeholder for the address you connect to, typically an IP-address. Examples of what an actual address could look like include "pi@192.168.4.2" and "youruser@example.com".|
+
+### Error: `IOError: connect: connection refused (ECONNREFUSED)`
+This error has been encountered when
+1) Running `connect_repl()` or `connect_remote()`, while attempting to connect to a local REPL. The problem was that no local REPL had previously run `serve_repl()`. To fix this, run `serve_repl()` in the local REPL.
+2) Running `connect_remote()`, while attempting to connect to a remote REPL. The problem was that no address was provided. To fix this, pass an address as a string to `connect_remote`, as in `connect_remote("address")`
+
+### Error: `RemoteREPL stream was closed while reading header`
+This error has been encountered when running `connect_remote("address")` or `connect_repl("address")`, while attempting to connect to a remote REPL. The problem was that the remote REPL had not previously run `serve_repl()`. To fix this, run `serve_repl()` in the remote REPL.
+
+### Error: `Bad owner or permissions on /home/username/.ssh/config`
+This error is raised by [this](https://github.com/openssh/openssh-portable/blob/947a3e829a5b8832a4768fd764283709a4ca7955/readconf.c#L1711) line of code, from OpenSSH. 
+The requirements translates to that "the config file must be owned by root or by the user running the ssh and can not be writable by any group or other users." 
+(Quoted from [this](https://superuser.com/questions/1212402/bad-owner-or-permissions-on-ssh-config-file) thread). The fix is therefore to remove write permissions for 
+any group or other users. On a linux system, this is accomplished by running the following code.
+```
+chmod go-w /home/username/.ssh/*
+```
+If you are using a different operating system, please google how to remove write permissions on files, and try to do the same thing.
