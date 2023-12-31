@@ -12,7 +12,7 @@ Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 
 [compat]
-OpenSSH_jll = "8.1"
+OpenSSH_jll = "8.1, 9"
 ReplMaker = "0.2"
 julia = "1.5"
 
